@@ -39,11 +39,11 @@ func main() {
 	}
 
 	var f mqtt.MessageHandler = func(client mqtt.Client, message mqtt.Message) {
-		log.Printf("Received message on topic: %s\nMessage: %s\n", message.Topic(), message.Payload())
+		log.Printf("received message on topic: %s - message: %s\n", message.Topic(), message.Payload())
 		topic := message.Topic()
 		val, err := strconv.ParseFloat(string(message.Payload()), 32)
 		if err != nil {
-			log.Println("Invalid point data, ignoring")
+			log.Println("invalid point data received from broker, ignoring")
 			return
 		}
 		fields := map[string]interface{}{
@@ -64,10 +64,10 @@ func main() {
 		bp.AddPoint(influxPoint)
 		err = influxClient.Write(bp)
 		if err != nil {
-			log.Println("Couldn't write to influx for some reason. Ignoring.", err)
+			log.Println("couldn't write to influx for some reason - ignored", err)
 			return
 		}
-		log.Println("supposedly written to influx")
+		log.Println("data written to influx")
 	}
 
 	if token := mqttClient.Subscribe(mqttTopic, 0, f); token.Wait() && token.Error() != nil {
