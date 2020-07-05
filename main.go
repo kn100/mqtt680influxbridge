@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -11,7 +10,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	influx "github.com/influxdata/influxdb1-client"
+	influx "github.com/influxdata/influxdb1-client/v2"
 )
 
 func main() {
@@ -26,45 +25,44 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	host, err := url.Parse(fmt.Sprintf("http://%s:%d", influxDbAddress, 8086))
-	if err != nil {
-		log.Fatal(err)
-	}
-	con, err := influx.NewClient(influx.Config{URL: *host})
+	influxHost := fmt.Sprintf("http://%s:%d", influxDbAddress, 8086)
+
+	influxClient, err := influx.NewHTTPClient(influx.HTTPConfig{Addr: influxHost, Timeout: 5 * time.Second})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	opts := mqtt.NewClientOptions().AddBroker(fmt.Sprintf("tcp://%s:%s", mqttAddress, mqttPort))
-	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
+	mqttClient := mqtt.NewClient(opts)
+	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
 
 	var f mqtt.MessageHandler = func(client mqtt.Client, message mqtt.Message) {
-		fmt.Printf("Received message on topic: %s\nMessage: %s\n", message.Topic(), message.Payload())
+		log.Printf("Received message on topic: %s\nMessage: %s\n", message.Topic(), message.Payload())
 		topic := message.Topic()
 		val, err := strconv.ParseFloat(string(message.Payload()), 32)
 		if err != nil {
 			log.Println("Invalid point data, ignoring")
 			return
 		}
-
-		var influxPoint = influx.Point{
-			Measurement: message.Topic(),
-			Time:        time.Now(),
-			Fields: map[string]interface{}{
-				topic: val,
-			},
+		fields := map[string]interface{}{
+			topic: val,
 		}
-		pts := make([]influx.Point, 1)
-		pts[0] = influxPoint
+		influxPoint, err := influx.NewPoint(message.Topic(), nil, fields, time.Now())
 
-		_, err = con.Write(influx.BatchPoints{
-			Points:          pts,
+		bp, err := influx.NewBatchPoints(influx.BatchPointsConfig{
 			Database:        influxDbDb,
+			Precision:       "s",
 			RetentionPolicy: "30_days",
 		})
+
+		if err != nil {
+			log.Fatalln("Error: ", err)
+		}
+
+		bp.AddPoint(influxPoint)
+		err = influxClient.Write(bp)
 		if err != nil {
 			log.Println("Couldn't write to influx for some reason. Ignoring.", err)
 			return
@@ -72,11 +70,11 @@ func main() {
 		log.Println("supposedly written to influx")
 	}
 
-	if token := client.Subscribe(mqttTopic, 0, f); token.Wait() && token.Error() != nil {
-		fmt.Println(token.Error())
+	if token := mqttClient.Subscribe(mqttTopic, 0, f); token.Wait() && token.Error() != nil {
+		log.Fatal(token.Error())
 	}
 	<-sigs
-	fmt.Println("Exiting")
+	log.Println("Exiting")
 }
 
 func envString(key, fallback string) string {
