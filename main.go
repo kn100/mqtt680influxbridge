@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -17,11 +19,12 @@ func main() {
 		mqttAddress     = envString("MQTT_ADDRESS", "192.168.0.17")
 		mqttPort        = envString("MQTT_ADDRESS", "1883")
 		mqttTopic       = envString("MQTT_TOPIC", "bme680/+")
-		mqttClientID    = envString("MQTT_CLIENT_ID", "BME680BRIDGE")
 		influxDbAddress = envString("INFLUXDB_ADDRESS", "192.168.0.17")
 		influxDbDb      = envString("INFLUXDB_DB", "bme680")
 	)
-	fmt.Println(mqttAddress, mqttPort, mqttTopic, mqttClientID, influxDbAddress, influxDbDb)
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	host, err := url.Parse(fmt.Sprintf("http://%s:%d", influxDbAddress, 8086))
 	if err != nil {
@@ -72,7 +75,8 @@ func main() {
 	if token := client.Subscribe(mqttTopic, 0, f); token.Wait() && token.Error() != nil {
 		fmt.Println(token.Error())
 	}
-	time.Sleep(30000000 * time.Second)
+	<-sigs
+	fmt.Println("Exiting")
 }
 
 func envString(key, fallback string) string {
